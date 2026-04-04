@@ -1,0 +1,37 @@
+# Flutter build outputs
+build/
+**/build/
+**/*.apk
+**/*.aab
+**/*.so
+**/*.ipa
+
+# Android
+.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+android/.gradle/
+android/app/build/
+**/android/app/build/
+GeneratedPluginRegistrant.java
+.cxx/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+
+# Keys (keep these secret)
+key.properties
+**/*.keystore
+**/*.jks
+gradle-wrapper.jar

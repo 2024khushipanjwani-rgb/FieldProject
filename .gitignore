@@ -1,0 +1,10 @@
+plant_tracker/build/
+plant_tracker/android/app/build/
+plant_tracker/android/.gradle/
+**/*.apk
+**/*.aab
+**/*.so
+**/*.ipa
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
