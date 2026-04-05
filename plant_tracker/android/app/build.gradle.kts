@@ -18,7 +18,7 @@ val flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "
 
 android {
     namespace = "com.example.plant_tracker"
-    compileSdk = 35 // Standard for modern Flutter
+    compileSdk = 36 // Standard for modern Flutter
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -32,7 +32,7 @@ android {
     defaultConfig {
         applicationId = "com.example.plant_tracker"
         minSdk = flutter.minSdkVersion
-        targetSdk = 34
+        targetSdk = 36
         versionCode = flutterVersionCode.toInt()
         versionName = flutterVersionName
         multiDexEnabled = true // <--- ADD THIS LINE
