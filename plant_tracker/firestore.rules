@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+
+      // Workers can only update their own limited self fields.
+      allow create: if isOwner(userId);
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["updatedAt", "todayStatus", "todayApprovalStatus", "todayCheckInDisplay"])
+      );
+      allow delete: if false;
+
+      match /attendance/{dayId} {
+        allow read: if isOwner(userId) || isAdmin();
+
+        // Worker can create/modify own pending attendance for today.
+        allow create: if isOwner(userId);
+        allow update: if isAdmin() || isOwner(userId);
+        allow delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isAdmin();
+        allow update: if isOwner(userId) || isAdmin();
+        allow delete: if false;
+      }
+    }
+
+    match /admin_notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /login_events/{eventId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

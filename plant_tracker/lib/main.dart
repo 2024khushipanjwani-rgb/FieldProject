@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';   // 👈 IMPORTANT
 import 'login_screen.dart';
 
 void main() async {
-  // This line is mandatory to prevent the black screen
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
-    // Initialize Firebase before the app starts
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
     debugPrint("Firebase failed to load: $e");
   }

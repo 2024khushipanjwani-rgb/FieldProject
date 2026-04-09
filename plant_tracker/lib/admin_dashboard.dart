@@ -1,11 +1,22 @@
+
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'attendance_screen.dart';
 import 'inventory_screen.dart';
 import 'salary_screen.dart';
 import 'orders_screen.dart';
+import 'notification_screen.dart';
+import 'login_screen.dart';
+import 'workers_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _currentUserStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +26,7 @@ class AdminDashboard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildFigmaHeader(),
+            _buildFigmaHeader(context),
             _buildSectionTitle("MANAGEMENT MODULES"),
             _buildModuleGrid(context),
             _buildSectionTitle("RECENT ACTIVITY"),
@@ -27,7 +38,7 @@ class AdminDashboard extends StatelessWidget {
   }
 
   // --- HEADER SECTION ---
-  Widget _buildFigmaHeader() {
+  Widget _buildFigmaHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(25, 60, 25, 30),
       decoration: const BoxDecoration(
@@ -47,31 +58,81 @@ class AdminDashboard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("SONA PEPCEE", style: TextStyle(color: Colors.white70, fontSize: 10, letterSpacing: 1.2)),
-                  Text("Good Morning, Admin 👋", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text("Friday, March 6, 2026", style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ],
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: _currentUserStream(),
+                builder: (context, snapshot) {
+                  final data = snapshot.data?.data();
+                  final username = (data?['username'] as String?)?.trim();
+                  final role = (data?['role'] as String?) ?? 'admin';
+                  final displayName = (username != null && username.isNotEmpty)
+                      ? username
+                      : "Admin";
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("SONA PEPCEE",
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                              letterSpacing: 1.2)),
+                      Text("Good Morning, $displayName 👋",
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold)),
+                      Text("Role: ${role.toUpperCase()}",
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                    ],
+                  );
+                },
               ),
+
+              // ✅ FIXED ROW
               Row(
                 children: [
-                  _headerIcon(Icons.notifications_none),
+                  _headerIcon(
+                    icon: Icons.notifications_none,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const NotificationScreen(),
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(width: 10),
-                  _headerIcon(Icons.logout),
+                  _headerIcon(
+                    icon: Icons.logout,
+                    onTap: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (!context.mounted) return;
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const LoginScreen(),
+                        ),
+                        (route) => false,
+                      );
+                    },
+                  ),
                 ],
-              )
+              ),
             ],
           ),
+
           const SizedBox(height: 25),
+
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _topStatusChip("3", "Present", Colors.green),
-              _topStatusChip("3", "Pending", Colors.orange),
-              _topStatusChip("2", "Completed", Colors.blue),
-              _topStatusChip("2", "Low Stock", Colors.red),
+              _topStatusChip("3", "Present"),
+              _topStatusChip("3", "Pending"),
+              _topStatusChip("2", "Completed"),
+              _topStatusChip("2", "Low Stock"),
             ],
           )
         ],
@@ -79,29 +140,38 @@ class AdminDashboard extends StatelessWidget {
     );
   }
 
-  Widget _headerIcon(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15), // Fixed warning
-        shape: BoxShape.circle,
+  Widget _headerIcon({required IconData icon, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.15),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: 20),
       ),
-      child: Icon(icon, color: Colors.white, size: 20),
     );
   }
 
-  Widget _topStatusChip(String count, String label, Color color) {
+  Widget _topStatusChip(String count, String label) {
     return Container(
       width: 75,
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15), // Fixed warning
+        color: Colors.white.withOpacity(0.15),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         children: [
-          Text(count, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 9)),
+          Text(count,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
+          Text(label,
+              style:
+                  const TextStyle(color: Colors.white70, fontSize: 9)),
         ],
       ),
     );
@@ -110,11 +180,16 @@ class AdminDashboard extends StatelessWidget {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(25, 25, 25, 15),
-      child: Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.1)),
+      child: Text(title,
+          style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+              letterSpacing: 1.1)),
     );
   }
 
-  // --- MODULE GRID SECTION ---
+  // --- MODULE GRID ---
   Widget _buildModuleGrid(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -125,95 +200,98 @@ class AdminDashboard extends StatelessWidget {
         crossAxisSpacing: 15,
         mainAxisSpacing: 15,
         children: [
-          _moduleCard(context, "Attendance", "Track & manage", "3 present", Icons.calendar_today, Colors.green, const AttendanceScreen()),
-          _moduleCard(context, "Salary", "Calculate payroll", "6 employees", Icons.attach_money, Colors.orange, const SalaryScreen()),
-          _moduleCard(context, "Inventory", "Stock management", "2 low stock", Icons.inventory_2_outlined, Colors.red, const InventoryScreen()),
-          _moduleCard(context, "Orders", "Track shipments", "3 pending", Icons.assignment_outlined, Colors.purple, const OrdersScreen()),
+          _moduleCard(context, "Attendance", "Track & manage",
+              Icons.calendar_today, Colors.green, const AttendanceScreen()),
+          _moduleCard(context, "Workers", "Manage attendance",
+              Icons.groups_2_outlined, Colors.indigo, const WorkersScreen()),
+          _moduleCard(context, "Salary", "Calculate payroll",
+              Icons.attach_money, Colors.orange, const SalaryScreen()),
+          _moduleCard(context, "Inventory", "Stock management",
+              Icons.inventory_2_outlined, Colors.red, const InventoryScreen()),
+          _moduleCard(context, "Orders", "Track shipments",
+              Icons.assignment_outlined, Colors.purple, const OrdersScreen()),
         ],
       ),
     );
   }
 
-  Widget _moduleCard(BuildContext context, String title, String sub, String tag, IconData icon, Color color, Widget? page) {
+  Widget _moduleCard(BuildContext context, String title, String sub,
+      IconData icon, Color color, Widget page) {
     return GestureDetector(
       onTap: () {
-        if (page != null) {
-          Navigator.push(context, MaterialPageRoute(builder: (context) => page));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("$title Screen not linked yet!")),
-          );
-        }
+        Navigator.push(
+            context, MaterialPageRoute(builder: (_) => page));
       },
       child: Container(
         padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10)], // Fixed warning
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10)
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1), // Fixed warning
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
+            Icon(icon, color: color),
             const Spacer(),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-            Text(sub, style: const TextStyle(color: Colors.grey, fontSize: 10)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1), // Fixed warning
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(tag, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold)),
-            )
+            Text(title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15)),
+            Text(sub,
+                style:
+                    const TextStyle(color: Colors.grey, fontSize: 10)),
           ],
         ),
       ),
     );
   }
 
-  // --- RECENT ACTIVITY SECTION ---
+  // --- RECENT ACTIVITY ---
   Widget _buildRecentActivityList() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         children: [
-          _activityTile("Worker Rahul marked attendance at 9:05 AM", "9:05 AM", Icons.person_outline, Colors.green),
-          _activityTile("New order ORD-2026-D07 received from Metro...", "Yesterday", Icons.shopping_bag_outlined, Colors.purple),
+          _activityTile("Worker Rahul marked attendance",
+              "9:05 AM", Icons.person_outline),
+          _activityTile("New order received",
+              "Yesterday", Icons.shopping_bag_outlined),
           const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  Widget _activityTile(String title, String time, IconData icon, Color color) {
+  Widget _activityTile(
+      String title, String time, IconData icon) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(15)),
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.1), // Fixed warning
-            radius: 18,
-            child: Icon(icon, color: color, size: 18),
+            backgroundColor: Colors.grey.withOpacity(0.2),
+            child: Icon(icon),
           ),
           const SizedBox(width: 15),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
-                Text(time, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
+                Text(time,
+                    style: const TextStyle(
+                        color: Colors.grey, fontSize: 10)),
               ],
             ),
           ),

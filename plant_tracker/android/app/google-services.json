@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "283945821825",
-    "project_id": "factorymanagementapp",
-    "storage_bucket": "factorymanagementapp.firebasestorage.app"
+    "project_number": "584993857235",
+    "firebase_url": "https://planttracker-fb02b-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "planttracker-fb02b",
+    "storage_bucket": "planttracker-fb02b.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:283945821825:android:0fe571b844ccc42e174f80",
+        "mobilesdk_app_id": "1:584993857235:android:453c7d5886fbb96c4d7e26",
         "android_client_info": {
           "package_name": "com.example.plant_tracker"
         }
@@ -15,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDDX6yKof-Jg2wnXdrkIWhMQvrCQE_45Gs"
+          "current_key": "AIzaSyD1UK7MFoYoFAyNLJHStQ6cDfFaGaEzMag"
         }
       ],
       "services": {
