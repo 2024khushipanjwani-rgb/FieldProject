@@ -2,12 +2,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'attendance_screen.dart';
+
+import '../manager/attendance_screen.dart';
 import 'inventory_screen.dart';
-import 'salary_screen.dart';
+import '../worker/salary_screen.dart';
 import 'orders_screen.dart';
 import 'notification_screen.dart';
-import 'login_screen.dart';
+import '../../login_screen.dart';
 import 'workers_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
