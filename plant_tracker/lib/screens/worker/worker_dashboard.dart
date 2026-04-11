@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
-import 'login_screen.dart';
+import '../../login_screen.dart';
 
 class WorkerDashboard extends StatefulWidget {
   const WorkerDashboard({super.key});
