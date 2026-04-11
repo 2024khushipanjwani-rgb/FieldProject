@@ -1,313 +1,258 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'admin_dashboard.dart';
-import 'worker_dashboard.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'screens/owner/owner_dashboard.dart';
+import 'screens/manager/manager_dashboard.dart';
+import 'screens/worker/worker_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool isAdmin = true;
   bool isLoading = false;
-  bool isSignupMode = false;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
+  final _db = FirebaseDatabase.instance.ref();
 
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController =
-      TextEditingController();
-
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Future<void> _saveUserProfile(User user) async {
-    final role = isAdmin ? 'admin' : 'worker';
-    final username = _usernameController.text.trim();
-    await _firestore.collection('users').doc(user.uid).set({
-      'uid': user.uid,
-      'email': user.email,
-      'username': username,
-      'role': role,
-      'daysWorked': 0,
-      'daysAbsent': 0,
-      'totalHolidays': 0,
-      'totalWorkingDays': 26,
-      'hourlyWage': 80.0,
-      'defaultDailyHours': 8,
-      'deductions': 0.0,
-      'lastCheckIn': '--:--',
-      'phone': '',
-      'department': 'Production',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
-
-  Future<void> _saveLoginEvent(User user) async {
-    final role = isAdmin ? 'admin' : 'worker';
-    await _firestore.collection('login_events').add({
-      'uid': user.uid,
-      'email': user.email,
-      'role': role,
-      'loggedInAt': FieldValue.serverTimestamp(),
-    });
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return '🌤 Good Morning';
+    if (h < 17) return '☀️ Good Afternoon';
+    return '🌙 Good Evening';
   }
 
   @override
   void dispose() {
     _emailController.dispose();
-    _usernameController.dispose();
     _passwordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  Future<void> _authenticateUser() async {
-    String email = _emailController.text.trim();
-    String username = _usernameController.text.trim();
-    String password = _passwordController.text.trim();
-    String confirmPassword = _confirmPasswordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter email & password")),
-      );
-      return;
-    }
-
-    if (isSignupMode && password != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Passwords do not match")),
-      );
-      return;
-    }
-
-    if (isSignupMode && username.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter a username")),
-      );
-      return;
-    }
-
-    setState(() => isLoading = true);
-
-    try {
-      UserCredential credential;
-      if (isSignupMode) {
-        credential = await _auth.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-        final createdUser = credential.user;
-        if (createdUser != null) {
-          await createdUser.updateDisplayName(username);
-          await _saveUserProfile(createdUser);
-          await _saveLoginEvent(createdUser);
-        }
-      } else {
-        credential = await _auth.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-        final loggedInUser = credential.user;
-        if (loggedInUser != null) {
-          await _firestore.collection('users').doc(loggedInUser.uid).set({
-            'uid': loggedInUser.uid,
-            'email': loggedInUser.email,
-            'role': isAdmin ? 'admin' : 'worker',
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-          await _saveLoginEvent(loggedInUser);
-        }
+  Future<String?> _getRoleFromDatabase(String uid, String email) async {
+    // Check owners
+    final ownersSnap = await _db.child('owners').get();
+    if (ownersSnap.exists) {
+      final owners = Map<String, dynamic>.from(ownersSnap.value as Map);
+      for (final entry in owners.entries) {
+        final o = Map<String, dynamic>.from(entry.value as Map);
+        if (o['uid'] == uid) return 'admin';
       }
+    }
+    // Check managers
+    final managersSnap = await _db.child('managers').get();
+    if (managersSnap.exists) {
+      final managers = Map<String, dynamic>.from(managersSnap.value as Map);
+      for (final entry in managers.entries) {
+        final m = Map<String, dynamic>.from(entry.value as Map);
+        if (m['uid'] == uid) return 'manager';
+      }
+    }
+    // Check workers
+    final workersSnap = await _db.child('workers').get();
+    if (workersSnap.exists) {
+      final workers = Map<String, dynamic>.from(workersSnap.value as Map);
+      for (final entry in workers.entries) {
+        final w = Map<String, dynamic>.from(entry.value as Map);
+        if (w['uid'] == uid) return 'worker';
+      }
+    }
+    return null;
+  }
 
+  Future<void> _login() async {
+    if (_emailController.text.trim().isEmpty || _passwordController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter email and password')));
+      return;
+    }
+    setState(() => isLoading = true);
+    try {
+      final credential = await _auth.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      final user = credential.user;
+      if (user == null) return;
+
+      final role = await _getRoleFromDatabase(user.uid, user.email ?? '');
       if (!mounted) return;
 
-      // 🔀 Navigate based on role
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) =>
-              isAdmin ? const AdminDashboard() : const WorkerDashboard(),
-        ),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = isSignupMode ? "Signup Failed" : "Login Failed";
-
-      if (e.code == 'user-not-found') {
-        message = "No user found with this email";
-      } else if (e.code == 'wrong-password') {
-        message = "Incorrect password";
-      } else if (e.code == 'email-already-in-use') {
-        message = "Email already registered. Please login.";
-      } else if (e.code == 'weak-password') {
-        message = "Password should be at least 6 characters";
-      } else if (e.code == 'invalid-email') {
-        message = "Enter a valid email address";
+      if (role == 'admin') {
+        Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const OwnerDashboard()));
+      } else if (role == 'manager') {
+        Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const ManagerDashboard()));
+      } else if (role == 'worker') {
+        Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const WorkerDashboard()));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Access denied. Contact your owner.')));
+        await _auth.signOut();
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } on FirebaseException catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Firestore save failed. Please try again.")),
-      );
+    } on FirebaseAuthException catch (e) {
+      String msg = 'Login failed';
+      if (e.code == 'user-not-found') msg = 'No account found';
+      if (e.code == 'wrong-password') msg = 'Incorrect password';
+      if (e.code == 'invalid-email') msg = 'Invalid email';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
-
     setState(() => isLoading = false);
+  }
+
+  void _quickAccess(String role) {
+    if (role == 'admin') {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const OwnerDashboard()));
+    } else if (role == 'manager') {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerDashboard()));
+    } else {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkerDashboard()));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final primaryColor =
-        isAdmin ? const Color(0xFF1B5E20) : const Color(0xFF3F51B5);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SingleChildScrollView(
         child: Column(
           children: [
+            // Header
             Container(
-              height: 300,
+              height: 280,
               width: double.infinity,
-              decoration: BoxDecoration(
-                color: primaryColor,
-                borderRadius: const BorderRadius.only(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1B5E20), Color(0xFF4CAF50)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.only(
                   bottomRight: Radius.circular(80),
                 ),
               ),
-              child: Center(
-                child: Text(
-                  isSignupMode
-                      ? "Create\nAccount"
-                      : isAdmin
-                          ? "Admin\nManager"
-                          : "Worker\nPortal",
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(30, 70, 30, 30),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_greeting,
+                      style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    const Text("SONA PEPCEE",
+                      style: TextStyle(color: Colors.white,
+                        fontSize: 28, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    const Text("Field Project Management",
+                      style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  ],
                 ),
               ),
             ),
-
             Padding(
-              padding: const EdgeInsets.all(30.0),
+              padding: const EdgeInsets.all(30),
               child: Column(
                 children: [
-                  // 📧 EMAIL FIELD
-                  if (isSignupMode) ...[
-                    TextField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(
-                        labelText: "Username",
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
+                  const SizedBox(height: 10),
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      prefixIcon: Icon(Icons.email),
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: const Icon(Icons.email),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
-                  // 🔒 PASSWORD FIELD
                   TextField(
                     controller: _passwordController,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: "Password",
-                      prefixIcon: Icon(Icons.lock),
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: const Icon(Icons.lock),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                   ),
-
-                  if (isSignupMode) ...[
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: _confirmPasswordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: "Confirm Password",
-                        prefixIcon: Icon(Icons.lock_outline),
-                      ),
-                    ),
-                  ],
-
                   const SizedBox(height: 30),
-
-                  // 🔁 ROLE SWITCH
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text("Worker"),
-                      Switch(
-                        value: isAdmin,
-                        onChanged: (value) {
-                          setState(() => isAdmin = value);
-                        },
-                      ),
-                      const Text("Admin"),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // 🔘 LOGIN BUTTON
                   SizedBox(
                     width: double.infinity,
                     height: 55,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
+                        backgroundColor: const Color(0xFF1B5E20),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
+                          borderRadius: BorderRadius.circular(15)),
                       ),
-                      onPressed: isLoading ? null : _authenticateUser,
+                      onPressed: isLoading ? null : _login,
                       child: isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Text(
-                              isSignupMode ? "SIGN UP" : "LOGIN",
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text('LOGIN',
+                            style: TextStyle(fontWeight: FontWeight.bold,
+                              fontSize: 16, color: Colors.white)),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  TextButton(
-                    onPressed: isLoading
-                        ? null
-                        : () {
-                            setState(() {
-                              isSignupMode = !isSignupMode;
-                              _usernameController.clear();
-                              _passwordController.clear();
-                              _confirmPasswordController.clear();
-                            });
-                          },
-                    child: Text(
-                      isSignupMode
-                          ? "Already registered? Login"
-                          : "No account? Sign up",
+                  const SizedBox(height: 35),
+                  // Quick Access
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [BoxShadow(
+                        color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                    ),
+                    child: Column(
+                      children: [
+                        const Text('⚡ Quick Access (Demo)',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        const SizedBox(height: 4),
+                        const Text('Explore without login',
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        const SizedBox(height: 15),
+                        Row(
+                          children: [
+                            _quickBtn('Owner', Icons.person, Colors.indigo, () => _quickAccess('admin')),
+                            const SizedBox(width: 8),
+                            _quickBtn('Manager', Icons.manage_accounts, Colors.orange, () => _quickAccess('manager')),
+                            const SizedBox(width: 8),
+                            _quickBtn('Worker', Icons.engineering, Colors.green, () => _quickAccess('worker')),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _quickBtn(String label, IconData icon, Color color, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(height: 4),
+              Text(label, style: TextStyle(color: color,
+                fontSize: 11, fontWeight: FontWeight.bold)),
+            ],
+          ),
         ),
       ),
     );
