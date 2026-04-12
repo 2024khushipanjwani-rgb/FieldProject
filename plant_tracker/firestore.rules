@@ -9,17 +9,35 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return userDocExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isManager() {
+      return isSignedIn() && userDocExists() && userRole() == "manager";
+    }
+
+    function isOwnerAccount() {
+      return isSignedIn() && userDocExists() &&
+        (userRole() == "owner" || userRole() == "admin");
+    }
+
+    /// Manager or owner (legacy `admin` counts as owner).
+    function isStaff() {
+      return isManager() || isOwnerAccount();
     }
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isStaff();
 
-      // Workers can only update their own limited self fields.
       allow create: if isOwner(userId);
-      allow update: if isAdmin() || (
+      allow update: if isStaff() || (
         isOwner(userId) &&
         request.resource.data.diff(resource.data).changedKeys()
           .hasOnly(["updatedAt", "todayStatus", "todayApprovalStatus", "todayCheckInDisplay"])
@@ -27,32 +45,51 @@ service cloud.firestore {
       allow delete: if false;
 
       match /attendance/{dayId} {
-        allow read: if isOwner(userId) || isAdmin();
+        allow read: if isOwner(userId) || isStaff();
 
-        // Worker can create/modify own pending attendance for today.
         allow create: if isOwner(userId);
-        allow update: if isAdmin() || isOwner(userId);
+        allow update: if isStaff() || isOwner(userId);
         allow delete: if false;
       }
 
       match /notifications/{notificationId} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow create: if isAdmin();
-        allow update: if isOwner(userId) || isAdmin();
+        allow read: if isOwner(userId) || isStaff();
+        allow create: if isStaff();
+        allow update: if isOwner(userId) || isStaff();
         allow delete: if false;
       }
     }
 
+    // Worker self check-in + manager operational alerts.
     match /admin_notifications/{notificationId} {
-      allow read: if isAdmin();
+      allow read: if isManager();
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update, delete: if isManager();
+    }
+
+    // Owner-only: manager marked someone present / late, etc.
+    match /owner_notifications/{notificationId} {
+      allow read: if isOwnerAccount();
+      allow create: if isManager();
+      allow update, delete: if isOwnerAccount();
+    }
+
+    match /funding_requests/{requestId} {
+      allow create: if isManager() &&
+        request.resource.data.managerId == request.auth.uid &&
+        request.resource.data.status == "pending";
+
+      allow read: if isOwnerAccount() ||
+        (isManager() && resource.data.managerId == request.auth.uid);
+
+      allow update: if isOwnerAccount();
+      allow delete: if false;
     }
 
     match /login_events/{eventId} {
       allow create: if isSignedIn() &&
         request.resource.data.uid == request.auth.uid;
-      allow read: if isAdmin();
+      allow read: if isStaff();
       allow update, delete: if false;
     }
   }

@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class NotificationScreen extends StatelessWidget {
-  const NotificationScreen({super.key});
+  const NotificationScreen({
+    super.key,
+    this.collectionPath = 'admin_notifications',
+    this.screenTitle = 'Notifications',
+  });
+
+  final String collectionPath;
+  final String screenTitle;
 
   IconData _iconForType(String type) {
     switch (type) {
       case 'attendance_marked':
       case 'attendance_updated_by_admin':
+      case 'manager_marked_present':
         return Icons.fact_check_outlined;
       default:
         return Icons.notifications;
@@ -28,14 +36,14 @@ class NotificationScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final notificationsStream = FirebaseFirestore.instance
-        .collection('admin_notifications')
+        .collection(collectionPath)
         .orderBy('createdAt', descending: true)
         .limit(100)
         .snapshots();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Notifications"),
+        title: Text(screenTitle),
         backgroundColor: Colors.green,
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
