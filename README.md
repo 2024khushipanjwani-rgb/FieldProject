@@ -1,4 +1,4 @@
-# Workforce Management System
+# PLANT TRACKER APP
 
 A comprehensive, role-based Flutter + Firebase application designed to streamline daily workforce operations. It bridges communication, attendance, and operational tracking between Workers, Managers, and Owners into a single, cohesive dashboard experience.
 
