@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:plant_tracker/core/app_roles.dart';
 
@@ -29,14 +30,14 @@ class _WorkerDetailsScreenState extends State<WorkerDetailsScreen> {
   DocumentReference<Map<String, dynamic>> get _workerRef =>
       FirebaseFirestore.instance.collection('users').doc(widget.workerId);
 
-  Future<bool> _canEditAsStaff() async {
+  Future<String?> _getCurrentUserRole() async {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUserId == null) return false;
+    if (currentUserId == null) return null;
     final doc = await FirebaseFirestore.instance
         .collection('users')
         .doc(currentUserId)
         .get();
-    return isStaffRole(doc.data()?['role'] as String?);
+    return doc.data()?['role'] as String?;
   }
 
   String? _requiredText(String? value, String label) {
@@ -49,8 +50,9 @@ class _WorkerDetailsScreenState extends State<WorkerDetailsScreen> {
   String? _phoneValidator(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Mobile number is required';
-    final phoneRegex = RegExp(r'^[0-9]{10,15}$');
-    if (!phoneRegex.hasMatch(v)) return 'Enter 10 to 15 digits';
+    if (v.length != 10) return 'Must be exactly 10 digits';
+    final phoneRegex = RegExp(r'^[0-9]{10}$');
+    if (!phoneRegex.hasMatch(v)) return 'Must contain only digits';
     return null;
   }
 
@@ -118,10 +120,12 @@ class _WorkerDetailsScreenState extends State<WorkerDetailsScreen> {
         backgroundColor: const Color(0xFF1B5E20),
       ),
       backgroundColor: const Color(0xFFF8FAFC),
-      body: FutureBuilder<bool>(
-        future: _canEditAsStaff(),
+      body: FutureBuilder<String?>(
+        future: _getCurrentUserRole(),
         builder: (context, roleSnapshot) {
-          final canEdit = roleSnapshot.data ?? false;
+          final role = roleSnapshot.data;
+          final canEdit = isStaffRole(role);
+          final isManager = isManagerRole(role);
           return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: _workerRef.snapshots(),
             builder: (context, snapshot) {
@@ -177,8 +181,12 @@ class _WorkerDetailsScreenState extends State<WorkerDetailsScreen> {
                       'Mobile Number',
                       Icons.phone,
                       keyboardType: TextInputType.phone,
-                      enabled: canEdit,
+                      enabled: canEdit && isManager, // Editable ONLY by manager
                       validator: _phoneValidator,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     _editableField(
@@ -290,12 +298,14 @@ class _WorkerDetailsScreenState extends State<WorkerDetailsScreen> {
     bool enabled = true,
     TextInputType keyboardType = TextInputType.text,
     String? Function(String?)? validator,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       enabled: enabled,
       validator: validator,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),

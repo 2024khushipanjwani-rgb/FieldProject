@@ -14,10 +14,12 @@ dependencies:
   firebase_core: ^3.15.2
   firebase_auth: ^5.7.0
   firebase_database: ^11.3.10
-  intl: ^0.19.0
+  intl: ^0.20.2
   cupertino_icons: ^1.0.8
   geolocator: ^10.1.0
   cloud_firestore: ^5.6.12
+  table_calendar: ^3.2.0
+  fl_chart: ^1.2.0
 
 dev_dependencies:
   flutter_test:

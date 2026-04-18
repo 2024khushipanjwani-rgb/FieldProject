@@ -9,11 +9,45 @@ class AttendanceScreen extends StatefulWidget {
 }
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
-  Stream<QuerySnapshot<Map<String, dynamic>>> _workersStream() {
-    return FirebaseFirestore.instance
+  DateTime _selectedDate = DateTime.now();
+
+  String get _dateKey {
+    return "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAttendanceForDate() async {
+    final workersSnap = await FirebaseFirestore.instance
         .collection('users')
         .where('role', isEqualTo: 'worker')
-        .snapshots();
+        .get();
+
+    List<Map<String, dynamic>> results = [];
+    
+    for (var worker in workersSnap.docs) {
+      final workerData = worker.data();
+      
+      // Fetch directly by ID avoiding collectionGroup indexing requirement
+      final attDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(worker.id)
+          .collection('attendance')
+          .doc(_dateKey)
+          .get();
+
+      final att = attDoc.data() ?? {};
+      
+      results.add({
+        'id': worker.id,
+        'name': workerData['username'] ?? workerData['email'] ?? 'Worker',
+        'status': att['status'] ?? 'Not Marked',
+        'timeIn': att['checkInDisplay'] ?? '--:--',
+        'timeOut': att['checkOutDisplay'] ?? '--:--',
+        'totalHours': (att['totalHours'] as num?)?.toDouble() ?? 0.0,
+        'approvalStatus': att['approvalStatus'] ?? '-',
+      });
+    }
+
+    return results;
   }
 
   Color _statusColor(String status) {
@@ -37,8 +71,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         children: [
           _buildHeader(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _workersStream(),
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _fetchAttendanceForDate(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -47,12 +81,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   return const Center(child: Text('Could not load attendance.'));
                 }
 
-                final workers = snapshot.data?.docs ?? [];
+                final workers = snapshot.data ?? [];
                 int presentCount = 0;
                 int absentCount = 0;
                 for (final worker in workers) {
-                  final status =
-                      (worker.data()['todayStatus'] as String?) ?? 'Not Marked';
+                  final status = worker['status'] as String;
                   if (status.toLowerCase() == 'present' ||
                       status.toLowerCase() == 'late') {
                     presentCount += 1;
@@ -73,30 +106,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         itemCount: workers.length,
                         itemBuilder: (context, index) {
-                          final workerData = workers[index].data();
-                          final name = (workerData['username'] as String?) ??
-                              (workerData['email'] as String?) ??
-                              'Worker';
-                          final status =
-                              (workerData['todayStatus'] as String?) ?? 'Not Marked';
-                          final timeIn =
-                              (workerData['todayCheckInDisplay'] as String?) ??
-                                  '--:--';
-                          final timeOut =
-                              (workerData['todayCheckOutDisplay'] as String?) ??
-                                  '--:--';
-                          final approval = (workerData['todayApprovalStatus']
-                                  as String?) ??
-                              '-';
-
+                          final worker = workers[index];
                           return _WorkerCard(
-                            name: name,
-                            id: workers[index].id,
-                            timeIn: timeIn,
-                            timeOut: timeOut,
-                            status: status,
-                            approvalStatus: approval,
-                            color: _statusColor(status),
+                            name: worker['name'],
+                            id: worker['id'],
+                            timeIn: worker['timeIn'],
+                            timeOut: worker['timeOut'],
+                            totalHours: worker['totalHours'],
+                            status: worker['status'],
+                            approvalStatus: worker['approvalStatus'],
+                            color: _statusColor(worker['status']),
                           );
                         },
                       ),
@@ -112,13 +131,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _buildHeader() {
-    final d = DateTime.now();
+    final d = _selectedDate;
     final months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
-    final dateLine =
-        'Today: ${months[d.month - 1]} ${d.day}, ${d.year}';
+    final dateLine = 'Date: ${months[d.month - 1]} ${d.day}, ${d.year}';
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 50, 20, 25),
@@ -152,7 +170,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ],
           ),
           const Spacer(),
-          const Icon(Icons.calendar_today, color: Colors.white70, size: 20),
+          IconButton(
+            icon: const Icon(Icons.calendar_today, color: Colors.white70, size: 20),
+            onPressed: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedDate,
+                firstDate: DateTime(2020),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null && mounted) {
+                setState(() {
+                  _selectedDate = picked;
+                });
+              }
+            },
+          ),
         ],
       ),
     );
@@ -234,6 +267,7 @@ class _WorkerCard extends StatelessWidget {
     required this.id,
     required this.timeIn,
     required this.timeOut,
+    required this.totalHours,
     required this.status,
     required this.approvalStatus,
     required this.color,
@@ -243,6 +277,7 @@ class _WorkerCard extends StatelessWidget {
   final String id;
   final String timeIn;
   final String timeOut;
+  final double totalHours;
   final String status;
   final String approvalStatus;
   final Color color;
@@ -307,6 +342,17 @@ class _WorkerCard extends StatelessWidget {
                             const TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
+                if (totalHours > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.timer, size: 14, color: Colors.blueAccent),
+                      const SizedBox(width: 4),
+                      Text('Worked ${totalHours.toStringAsFixed(1)} hours today',
+                          style: const TextStyle(color: Colors.blueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(
                   'Approval: ${approvalStatus.toUpperCase()}',

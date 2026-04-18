@@ -12,7 +12,7 @@ class WorkersScreen extends StatelessWidget {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  Future<void> _updateWorkerAttendance(
+  Future<void> _markAttendance(
     BuildContext context, {
     required String workerId,
     required String workerName,
@@ -26,7 +26,6 @@ class WorkersScreen extends StatelessWidget {
         "${now.hour}:${now.minute.toString().padLeft(2, '0')} ${now.hour >= 12 ? 'PM' : 'AM'}";
 
     try {
-      // Attendance transaction block
       await firestore.runTransaction((transaction) async {
         final userSnapshot = await transaction.get(userRef);
         final attendanceSnapshot = await transaction.get(attendanceRef);
@@ -34,136 +33,89 @@ class WorkersScreen extends StatelessWidget {
         final userData = userSnapshot.data() ?? <String, dynamic>{};
         int daysWorked = (userData['daysWorked'] as num?)?.toInt() ?? 0;
         int daysAbsent = (userData['daysAbsent'] as num?)?.toInt() ?? 0;
-        final totalHolidays = (userData['totalHolidays'] as num?)?.toInt() ?? 0;
-        final totalWorkingDays =
-            (userData['totalWorkingDays'] as num?)?.toInt() ?? 26;
-        final savedHourlyWage = (userData['hourlyWage'] as num?)?.toDouble();
-        final legacyDailyWage = (userData['dailyWage'] as num?)?.toDouble();
-        final hourlyWage = savedHourlyWage ??
-            (legacyDailyWage != null ? legacyDailyWage / 8 : 80.0);
-        final defaultDailyHours =
-            (userData['defaultDailyHours'] as num?)?.toInt() ?? 8;
-        final deductions = (userData['deductions'] as num?)?.toDouble() ?? 0.0;
-
+        
         final previousStatus =
             (attendanceSnapshot.data()?['status'] as String?)?.toLowerCase();
-        final nextStatus = status.toLowerCase();
-        final markedAt = attendanceSnapshot.data()?['markedAt'];
 
-        void decrementCountFor(String? currentStatus) {
-          if (currentStatus == 'present' || currentStatus == 'late') {
-            daysWorked = daysWorked > 0 ? daysWorked - 1 : 0;
-          } else if (currentStatus == 'absent') {
+        if (previousStatus != status) {
+          if (previousStatus == 'absent') {
             daysAbsent = daysAbsent > 0 ? daysAbsent - 1 : 0;
           }
-        }
+          if (previousStatus == 'present' || previousStatus == 'late') {
+            daysWorked = daysWorked > 0 ? daysWorked - 1 : 0;
+          }
 
-        void incrementCountFor(String currentStatus) {
-          if (currentStatus == 'present' || currentStatus == 'late') {
-            daysWorked += 1;
-          } else if (currentStatus == 'absent') {
+          if (status == 'absent') {
             daysAbsent += 1;
+          } else if (status == 'present' || status == 'late') {
+            daysWorked += 1;
           }
         }
 
-        if (previousStatus != nextStatus) {
-          decrementCountFor(previousStatus);
-          incrementCountFor(nextStatus);
+        if (status == 'absent') {
+          transaction.set(attendanceRef, {
+            'status': status,
+            'checkInDisplay': '-',
+            'checkOutDisplay': '-',
+            'approvalStatus': 'approved',
+            'approvedByAdmin': true,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'date': _todayKey,
+          }, SetOptions(merge: true));
+
+          transaction.set(userRef, {
+            'daysWorked': daysWorked,
+            'daysAbsent': daysAbsent,
+            'todayStatus': status,
+            'todayDateKey': _todayKey,
+            'todayApprovalStatus': 'approved',
+            'todayCheckInDisplay': '-',
+            'todayCheckOutDisplay': '-',
+            'todayApprovedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } else {
+          transaction.set(attendanceRef, {
+            'status': status,
+            'inTimeMillis': now.millisecondsSinceEpoch,
+            'checkInDisplay': formattedTime,
+            'checkOutDisplay': '--:--',
+            'approvalStatus': 'approved',
+            'approvedByAdmin': true,
+            'approvedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+            'date': _todayKey,
+          }, SetOptions(merge: true));
+
+          transaction.set(userRef, {
+            'daysWorked': daysWorked,
+            'daysAbsent': daysAbsent,
+            'lastCheckIn': formattedTime,
+            'todayStatus': status,
+            'todayDateKey': _todayKey,
+            'todayApprovalStatus': 'approved',
+            'todayCheckInDisplay': formattedTime,
+            'todayCheckOutDisplay': '--:--',
+            'todayInTimeMillis': now.millisecondsSinceEpoch,
+            'todayApprovedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
         }
-
-        transaction.set(attendanceRef, {
-          'status': status,
-          'checkInDisplay': nextStatus == 'absent' ? '-' : formattedTime,
-          'checkOutDisplay': nextStatus == 'absent' ? '-' : '-',
-          'approvalStatus': 'approved',
-          'approvedByAdmin': true,
-          'approvedAt': FieldValue.serverTimestamp(),
-          'markedAt': markedAt ?? FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-        transaction.set(userRef, {
-          'daysWorked': daysWorked,
-          'daysAbsent': daysAbsent,
-          'totalHolidays': totalHolidays,
-          'totalWorkingDays': totalWorkingDays,
-          'hourlyWage': hourlyWage,
-          'defaultDailyHours': defaultDailyHours,
-          'deductions': deductions,
-          'lastCheckIn': nextStatus == 'absent' ? '-' : formattedTime,
-          'todayStatus': status,
-          'todayApprovalStatus': 'approved',
-          'todayCheckInDisplay': nextStatus == 'absent' ? '-' : formattedTime,
-          'todayCheckOutDisplay': nextStatus == 'absent' ? '-' : '-',
-          'todayApprovedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
       });
 
-      // Core update succeeded
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Updated $workerName as $status')),
-      );
-
-      // Best-effort background notification pushes (prevent UI errors if blocked by rules)
-      try {
-        await firestore.collection('admin_notifications').add({
-          'type': 'attendance_updated_by_admin',
-          'title': 'Attendance updated',
-          'message': '$workerName marked as $status for today.',
-          'workerId': workerId,
-          'workerName': workerName,
-          'status': status,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        final st = status.toLowerCase();
-        if (st == 'present' || st == 'late') {
-          final mgr = FirebaseAuth.instance.currentUser;
-          await firestore.collection('owner_notifications').add({
-            'type': 'manager_marked_present',
-            'title': 'Worker marked present',
-            'message':
-                '$workerName was marked $status at $formattedTime (manager).',
-            'workerId': workerId,
-            'workerName': workerName,
-            'status': status,
-            'managerId': mgr?.uid,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-        }
-
-        await firestore
-            .collection('users')
-            .doc(workerId)
-            .collection('notifications')
-            .add({
-          'type': 'attendance_approved',
-          'title': 'Attendance updated',
-          'message': 'Your attendance was set to $status for today.',
-          'status': status,
-          'createdAt': FieldValue.serverTimestamp(),
-          'isRead': false,
-        });
-      } catch (e) {
-        debugPrint("Minor Notification Error (Ignored): $e");
-      }
-
-    } on FirebaseException catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Firebase Error: ${e.message}')),
+        SnackBar(content: Text('Marked $workerName as $status')),
       );
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update attendance: $e')),
+        SnackBar(content: Text('Failed: $e')),
       );
     }
   }
 
-  Future<void> _recordCheckOut(
+  Future<void> _markOutTime(
     BuildContext context, {
     required String workerId,
     required String workerName,
@@ -171,6 +123,7 @@ class WorkersScreen extends StatelessWidget {
     final firestore = FirebaseFirestore.instance;
     final userRef = firestore.collection('users').doc(workerId);
     final attendanceRef = userRef.collection('attendance').doc(_todayKey);
+    final wagesRef = userRef.collection('wages').doc(_todayKey);
     final now = DateTime.now();
     final formattedTime =
         "${now.hour}:${now.minute.toString().padLeft(2, '0')} ${now.hour >= 12 ? 'PM' : 'AM'}";
@@ -178,78 +131,101 @@ class WorkersScreen extends StatelessWidget {
     try {
       await firestore.runTransaction((transaction) async {
         final snap = await transaction.get(attendanceRef);
-        if (!snap.exists) {
-          throw StateError('no-attendance');
-        }
+        final userSnap = await transaction.get(userRef);
+        if (!snap.exists) throw StateError('no-attendance');
+        
         final d = snap.data() ?? {};
+        final userData = userSnap.data() ?? {};
+        
         final st = (d['status'] as String?)?.toLowerCase() ?? '';
-        if (st != 'present' && st != 'late') {
-          throw StateError('not-checked-in');
-        }
+        if (st != 'present' && st != 'late') throw StateError('not-checked-in');
+        
         final out = (d['checkOutDisplay'] as String?)?.trim() ?? '';
-        if (out.isNotEmpty && out != '-') {
-          throw StateError('already-out');
+        if (out.isNotEmpty && out != '-' && out != '--:--') throw StateError('already-out');
+
+        final inTimeMillis = d['inTimeMillis'] as int? ?? userData['todayInTimeMillis'] as int?;
+        double totalHours = 8.0; 
+        if (inTimeMillis != null) {
+          final inTime = DateTime.fromMillisecondsSinceEpoch(inTimeMillis);
+          final diff = now.difference(inTime);
+          totalHours = diff.inMinutes / 60.0;
         }
+
+        final savedHourlyWage = (userData['hourlyWage'] as num?)?.toDouble() ?? 80.0;
+        final dailyWage = totalHours * savedHourlyWage;
+
         transaction.set(attendanceRef, {
           'checkOutDisplay': formattedTime,
+          'outTimeMillis': now.millisecondsSinceEpoch,
+          'totalHours': totalHours,
           'checkOutAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+
         transaction.set(userRef, {
           'todayCheckOutDisplay': formattedTime,
+          'todayTotalHours': totalHours,
           'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        
+        transaction.set(wagesRef, {
+          'date': _todayKey,
+          'totalHours': totalHours,
+          'earned': dailyWage,
+          'status': 'credited',
+          'timestamp': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       });
 
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Check-out recorded for $workerName')),
+        SnackBar(content: Text('Marked out-time for $workerName')),
       );
     } on StateError catch (e) {
       if (!context.mounted) return;
       final msg = switch (e.message) {
-        'no-attendance' => 'Mark present or late before check-out.',
-        'not-checked-in' => 'Check-out only after present/late.',
-        'already-out' => 'Check-out already recorded.',
-        _ => 'Could not record check-out.',
+        'no-attendance' => 'Mark attendance before marking out.',
+        'not-checked-in' => 'End shift only after marking present.',
+        'already-out' => 'Out-time already recorded.',
+        _ => 'Could not mark out.',
       };
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    } catch (_) {
+    } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to record check-out.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
     }
   }
 
-  Widget _statusButton(
-    BuildContext context, {
-    required bool enabled,
-    required String workerId,
-    required String workerName,
-    required String label,
-    required Color color,
-  }) {
-    return Expanded(
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color.withValues(alpha: 0.12),
-          foregroundColor: color,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        onPressed: enabled
-            ? () => _updateWorkerAttendance(
-                  context,
-                  workerId: workerId,
-                  workerName: workerName,
-                  status: label,
-                )
-            : null,
-        child: Text(label, style: const TextStyle(fontSize: 12)),
+  Future<void> _deleteWorker(BuildContext context, String workerId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Worker'),
+        content: const Text('Are you sure you want to permanently delete this worker account?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
+    
+    if (confirm != true) return;
+    
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(workerId).delete();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Worker deleted successfully.'))
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete worker: $e'))
+      );
+    }
   }
 
   @override
@@ -304,20 +280,19 @@ class WorkersScreen extends StatelessWidget {
                       : (data['email'] as String?) ?? 'Worker';
               final daysWorked = (data['daysWorked'] as num?)?.toInt() ?? 0;
               final daysAbsent = (data['daysAbsent'] as num?)?.toInt() ?? 0;
+              final todayDateKey = (data['todayDateKey'] as String?) ?? '';
+              final isToday = todayDateKey == _todayKey;
+
               final todayStatus =
-                  (data['todayStatus'] as String?) ?? 'Not marked';
+                  isToday ? ((data['todayStatus'] as String?) ?? 'Not marked') : 'Not marked';
               final todayApproval =
-                  (data['todayApprovalStatus'] as String?) ?? '-';
+                  isToday ? ((data['todayApprovalStatus'] as String?) ?? '-') : '-';
               final todayTime =
-                  (data['todayCheckInDisplay'] as String?) ?? '--:--';
+                  isToday ? ((data['todayCheckInDisplay'] as String?) ?? '--:--') : '--:--';
               final todayOut =
-                  (data['todayCheckOutDisplay'] as String?) ?? '--:--';
+                  isToday ? ((data['todayCheckOutDisplay'] as String?) ?? '--:--') : '--:--';
               final stLower = todayStatus.toLowerCase();
-              final canCheckOut = canMark &&
-                  (stLower == 'present' || stLower == 'late') &&
-                  (todayOut == '--:--' ||
-                      todayOut == '-' ||
-                      todayOut.trim().isEmpty);
+
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -358,6 +333,13 @@ class WorkersScreen extends StatelessWidget {
                                 ),
                               ),
                             ),
+                            if (canMark)
+                              IconButton(
+                                tooltip: 'Delete worker',
+                                color: Colors.redAccent,
+                                onPressed: () => _deleteWorker(context, workerId),
+                                icon: const Icon(Icons.delete_outline, size: 20),
+                              ),
                             IconButton(
                               tooltip: 'Edit worker profile',
                               onPressed: () {
@@ -407,55 +389,86 @@ class WorkersScreen extends StatelessWidget {
                           style: const TextStyle(
                               color: Colors.black54, fontSize: 12),
                         ),
-                        if (canCheckOut) ...[
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 40,
-                            child: OutlinedButton.icon(
-                              onPressed: () => _recordCheckOut(
-                                context,
-                                workerId: workerId,
-                                workerName: workerName,
+                        if (canMark) ...[
+                          const SizedBox(height: 12),
+                          if (stLower == 'absent')
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              icon: const Icon(Icons.logout, size: 18),
-                              label: const Text('Record check-out time'),
+                              alignment: Alignment.center,
+                              child: const Text('Marked Absent Today', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                            )
+                          else if ((stLower == 'present' || stLower == 'late') && todayOut != '--:--' && todayOut != '-')
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text('Shift Ended at $todayOut', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                            )
+                          else if (stLower == 'present' || stLower == 'late')
+                            SizedBox(
+                              width: double.infinity,
+                              height: 44,
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red.shade600,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () => _markOutTime(context, workerId: workerId, workerName: workerName),
+                                icon: const Icon(Icons.stop_circle, size: 20),
+                                label: const Text('Mark Out Time', style: TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                            )
+                          else
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.green.shade700,
+                                      side: BorderSide(color: Colors.green.shade200),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _markAttendance(context, workerId: workerId, workerName: workerName, status: 'present'),
+                                    child: const Text('Present', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.orange.shade700,
+                                      side: BorderSide(color: Colors.orange.shade200),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _markAttendance(context, workerId: workerId, workerName: workerName, status: 'late'),
+                                    child: const Text('Late', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red.shade700,
+                                      side: BorderSide(color: Colors.red.shade200),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _markAttendance(context, workerId: workerId, workerName: workerName, status: 'absent'),
+                                    child: const Text('Absent', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        if (canMark)
-                          Row(
-                            children: [
-                              _statusButton(
-                                context,
-                                enabled: true,
-                                workerId: workerId,
-                                workerName: workerName,
-                                label: 'Present',
-                                color: Colors.green,
-                              ),
-                              const SizedBox(width: 8),
-                              _statusButton(
-                                context,
-                                enabled: true,
-                                workerId: workerId,
-                                workerName: workerName,
-                                label: 'Late',
-                                color: Colors.orange,
-                              ),
-                              const SizedBox(width: 8),
-                              _statusButton(
-                                context,
-                                enabled: true,
-                                workerId: workerId,
-                                workerName: workerName,
-                                label: 'Absent',
-                                color: Colors.red,
-                              ),
-                            ],
-                          )
-                        else
+                        ] else
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),

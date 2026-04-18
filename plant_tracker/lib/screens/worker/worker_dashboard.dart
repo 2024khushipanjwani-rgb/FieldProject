@@ -249,7 +249,7 @@ class _WorkerDashboardState extends State<WorkerDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text("Worker Portal",
+                    const Text("Worker Portal",
                         style: TextStyle(color: Colors.white70, fontSize: 12)),
                     Text(username,
                         style: const TextStyle(

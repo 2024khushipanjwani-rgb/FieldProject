@@ -53,18 +53,38 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   bool showAll = true;
+  String _searchQuery = '';
 
-  final nameController = TextEditingController();
+  static const List<String> _allowedMaterials = [
+    'preservatives', 'essence', 'citric acid', 'plastic wrapper', 'sugar'
+  ];
+  String? _selectedMaterial;
+  final _formKey = GlobalKey<FormState>();
+
   final supplierController = TextEditingController(); // Maps to category
   final availController = TextEditingController();
   final minController = TextEditingController();
   final priceController = TextEditingController();
+  final searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    supplierController.dispose();
+    availController.dispose();
+    minController.dispose();
+    priceController.dispose();
+    searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _saveNewItem() async {
-    final nameStr = nameController.text.trim();
-    if (nameStr.isEmpty) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final nameStr = _selectedMaterial;
+    if (nameStr == null || nameStr.isEmpty) return;
 
     final avail = int.tryParse(availController.text) ?? 0;
+    if (avail > 1000) return;
     final minVal = int.tryParse(minController.text) ?? 0;
     final priceStr = double.tryParse(priceController.text) ?? 0.0;
 
@@ -83,7 +103,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
-      nameController.clear();
+      _selectedMaterial = null;
       supplierController.clear();
       availController.clear();
       minController.clear();
@@ -93,8 +113,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
   
   Future<void> _updateStock(String docId, int oldVal, int change) async {
     try {
+      final newVal = oldVal + change;
+      if (newVal > 1000) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Maximum quantity limit is 1000!'))
+          );
+        }
+        return;
+      }
       await FirebaseFirestore.instance.collection('inventory').doc(docId).update({
-        'quantity': oldVal + change < 0 ? 0 : oldVal + change,
+        'quantity': newVal < 0 ? 0 : newVal,
       });
     } catch (e) {
       debugPrint("Failed to update stock: $e");
@@ -110,6 +139,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   void _showAddItemSheet() {
+    _selectedMaterial = null;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -119,37 +149,70 @@ class _InventoryScreenState extends State<InventoryScreen> {
           bottom: MediaQuery.of(context).viewInsets.bottom,
           top: 20, left: 20, right: 20,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Add New Material", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            TextField(controller: nameController, decoration: const InputDecoration(labelText: "Material Name", border: OutlineInputBorder())),
-            const SizedBox(height: 15),
-            TextField(controller: supplierController, decoration: const InputDecoration(labelText: "Supplier / Category", border: OutlineInputBorder())),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(child: TextField(controller: availController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Initial Qty", border: OutlineInputBorder()))),
-                const SizedBox(width: 10),
-                Expanded(child: TextField(controller: minController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Min Alert", border: OutlineInputBorder()))),
-              ],
-            ),
-            const SizedBox(height: 15),
-            TextField(controller: priceController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "Cost/Price (Unit)", border: OutlineInputBorder())),
-            const SizedBox(height: 25),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
-                onPressed: _saveNewItem,
-                child: const Text("Save Item"),
+        child: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Add New Material", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
+                    value: _selectedMaterial,
+                    decoration: const InputDecoration(labelText: "Material Name", border: OutlineInputBorder()),
+                    items: _allowedMaterials.map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      setModalState(() {
+                        _selectedMaterial = newValue;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a material' : null,
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(controller: supplierController, decoration: const InputDecoration(labelText: "Supplier / Category", border: OutlineInputBorder())),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: availController, 
+                          keyboardType: TextInputType.number, 
+                          decoration: const InputDecoration(labelText: "Initial Qty", border: OutlineInputBorder()),
+                          validator: (value) {
+                            final qty = int.tryParse(value ?? '') ?? 0;
+                            if (qty > 1000) return 'Max 1000 allowed';
+                            return null;
+                          },
+                        )
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: TextField(controller: minController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Min Alert", border: OutlineInputBorder()))),
+                    ],
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(controller: priceController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "Cost/Price (Unit)", border: OutlineInputBorder())),
+                  const SizedBox(height: 25),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
+                      onPressed: _saveNewItem,
+                      child: const Text("Save Item"),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
               ),
-            ),
-            const SizedBox(height: 20),
-          ],
+            );
+          }
         ),
       ),
     );
@@ -171,13 +234,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
           
           final docs = snapshot.data?.docs ?? [];
           final allItems = docs.map((d) => StockItem.fromDoc(d)).toList();
-          final lowItems = allItems.where((i) => i.isLow).toList();
-          final displayedItems = showAll ? allItems : lowItems;
+          
+          List<StockItem> filteredItems = allItems;
+          if (_searchQuery.trim().isNotEmpty) {
+            final query = _searchQuery.trim().toLowerCase();
+            filteredItems = filteredItems.where((i) => i.name.toLowerCase().contains(query)).toList();
+          }
+
+          final lowItems = filteredItems.where((i) => i.isLow).toList();
+          final displayedItems = showAll ? filteredItems : lowItems;
 
           return Column(
             children: [
-              _buildHeader(allItems.length, lowItems.length),
-              _buildSearchAndFilters(allItems.length, lowItems.length),
+              _buildHeader(filteredItems.length, lowItems.length),
+              _buildSearchAndFilters(filteredItems.length, lowItems.length),
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -246,6 +316,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
       child: Column(
         children: [
           TextField(
+            controller: searchController,
+            onChanged: (val) {
+              setState(() {
+                _searchQuery = val;
+              });
+            },
             decoration: InputDecoration(
               hintText: "Search materials...",
               prefixIcon: const Icon(Icons.search),

@@ -12,6 +12,7 @@ import 'package:plant_tracker/core/app_roles.dart';
 import 'package:plant_tracker/screens/manager/staff_weekly_overview_screen.dart';
 import 'package:plant_tracker/screens/manager/funding_request_screen.dart';
 import 'package:plant_tracker/screens/owner/owner_funding_screen.dart';
+import 'package:plant_tracker/screens/manager/calendar_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
@@ -162,15 +163,42 @@ class AdminDashboard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 25),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _topStatusChip("—", "Present"),
-              _topStatusChip("—", "Pending"),
-              _topStatusChip("—", "Done"),
-              _topStatusChip("—", "Stock"),
-            ],
-          )
+          Builder(
+            builder: (context) {
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              if (uid == null) return const SizedBox();
+              
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('funding_requests')
+                    .where('managerId', isEqualTo: uid)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  int raised = 0;
+                  int pending = 0;
+                  int approved = 0;
+                  
+                  if (snapshot.hasData) {
+                    final docs = snapshot.data!.docs;
+                    raised = docs.length;
+                    for (var doc in docs) {
+                      final status = (doc.data()['status'] as String?)?.toLowerCase();
+                      if (status == 'pending') pending++;
+                      if (status == 'approved') approved++;
+                    }
+                  }
+                  
+                  return Row(
+                    children: [
+                      _topStatusChip(raised.toString(), "Raised"),
+                      _topStatusChip(approved.toString(), "Approved"),
+                      _topStatusChip(pending.toString(), "Pending"),
+                    ],
+                  );
+                },
+              );
+            }
+          ),
         ],
       ),
     );
@@ -191,24 +219,26 @@ class AdminDashboard extends StatelessWidget {
   }
 
   Widget _topStatusChip(String count, String label) {
-    return Container(
-      width: 75,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Text(count,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16)),
-          Text(label,
-              style:
-                  const TextStyle(color: Colors.white70, fontSize: 9)),
-        ],
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Text(count,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
+            Text(label,
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 10)),
+          ],
+        ),
       ),
     );
   }
@@ -277,6 +307,8 @@ class AdminDashboard extends StatelessWidget {
                 Icons.inventory_2_outlined, Colors.red, const InventoryScreen()),
             _moduleCard(context, "Orders", "Track shipments",
                 Icons.assignment_outlined, Colors.purple, const OrdersScreen()),
+            _moduleCard(context, "Operations", "Calendar timeline",
+                Icons.event_note, Colors.blueGrey, const CalendarEventsScreen()),
           ]);
         }
 

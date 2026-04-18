@@ -45,16 +45,26 @@ class OrdersScreen extends StatefulWidget {
 }
 
 class _OrdersScreenState extends State<OrdersScreen> {
+  final _formKey = GlobalKey<FormState>();
   final customerController = TextEditingController();
-  final itemController = TextEditingController();
+  
+  static const List<String> _allowedFlavours = [
+    'jeera', 'mango', 'red', 'orange', 'kacchi kiri', 'lima', 
+    'blueberry', 'pineapple', 'lassi', 'pineapple lassi', 'strawberry lassi'
+  ];
+  String? _selectedFlavour;
+  
   final qtyController = TextEditingController();
 
   Future<void> _addSimpleOrder() async {
-    final cust = customerController.text.trim();
-    final item = itemController.text.trim();
-    final qty = int.tryParse(qtyController.text) ?? 1;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    if (cust.isEmpty || item.isEmpty) return;
+    final cust = customerController.text.trim();
+    final item = _selectedFlavour;
+    final qty = int.tryParse(qtyController.text) ?? 0;
+
+    if (cust.isEmpty || item == null) return;
+    if (qty < 100 || qty > 1000) return;
 
     final orderId = "ORD-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}";
 
@@ -69,37 +79,74 @@ class _OrdersScreenState extends State<OrdersScreen> {
     });
 
     customerController.clear();
-    itemController.clear();
+    _selectedFlavour = null;
     qtyController.clear();
     if (!mounted) return;
     Navigator.pop(context);
   }
 
   void _showAddOrderSheet() {
+    _selectedFlavour = null;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, top: 20, left: 20, right: 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Create Simple Order", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 15),
-            TextField(controller: customerController, decoration: const InputDecoration(labelText: "Customer Name", border: OutlineInputBorder())),
-            const SizedBox(height: 10),
-            TextField(controller: itemController, decoration: const InputDecoration(labelText: "Product/Material Name", border: OutlineInputBorder())),
-            const SizedBox(height: 10),
-            TextField(controller: qtyController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Quantity", border: OutlineInputBorder())),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _addSimpleOrder,
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-              child: const Text("Place Order"),
+        child: StatefulBuilder(
+          builder: (context, setModalState) {
+            return Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Create Simple Order", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 15),
+                  TextFormField(
+                    controller: customerController, 
+                    decoration: const InputDecoration(labelText: "Customer Name", border: OutlineInputBorder()),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+                  ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _selectedFlavour,
+                  decoration: const InputDecoration(labelText: "Product / Flavour", border: OutlineInputBorder()),
+                  items: _allowedFlavours.map((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (newValue) {
+                    setModalState(() {
+                      _selectedFlavour = newValue;
+                    });
+                  },
+                  validator: (value) => value == null ? 'Please select a flavour' : null,
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: qtyController, 
+                  keyboardType: TextInputType.number, 
+                  decoration: const InputDecoration(labelText: "Quantity", border: OutlineInputBorder()),
+                  validator: (value) {
+                    final qty = int.tryParse(value ?? '') ?? 0;
+                    if (qty < 100) return 'Minimum 100 required';
+                    if (qty > 1000) return 'Maximum 1000 allowed';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _addSimpleOrder,
+                  style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+                  child: const Text("Place Order"),
+                ),
+                const SizedBox(height: 20),
+              ],
             ),
-            const SizedBox(height: 20),
-          ],
+           );
+          }
         ),
       ),
     );
