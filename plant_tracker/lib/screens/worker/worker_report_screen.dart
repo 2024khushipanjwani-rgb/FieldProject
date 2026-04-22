@@ -1,18 +1,276 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class WorkerReportScreen extends StatelessWidget {
   const WorkerReportScreen({super.key});
 
+  static String _dayKey(DateTime d) {
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('My Reports')),
+        body: const Center(child: Text('User not logged in.')),
+      );
+    }
+    final workerId = user.uid;
+
     return Scaffold(
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('My Reports'),
+        title: const Text('Wages & Attendance Report'),
         backgroundColor: const Color(0xFF3F51B5),
         foregroundColor: Colors.white,
       ),
-      body: const Center(
-        child: Text('Report details will appear here.'),
+      body: Column(
+        children: [
+          _buildWageSummary(workerId),
+          Expanded(child: _buildAttendanceList(workerId)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWageSummary(String workerId) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(workerId).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final data = snapshot.data!.data() ?? {};
+        
+        final daysWorked = (data['daysWorked'] as num?)?.toDouble() ?? 0;
+        final defaultDailyHours = (data['defaultDailyHours'] as num?)?.toDouble() ?? 8;
+        final savedHourlyWage = (data['hourlyWage'] as num?)?.toDouble();
+        final legacyDailyWage = (data['dailyWage'] as num?)?.toDouble();
+        final hourlyWage = savedHourlyWage ?? (legacyDailyWage != null ? legacyDailyWage / 8 : 80);
+        final deductions = (data['deductions'] as num?)?.toDouble() ?? 0;
+        
+        final monthlyHours = daysWorked * defaultDailyHours;
+        final netSalary = (hourlyWage * monthlyHours) - deductions;
+
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+              )
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.account_balance_wallet, color: Color(0xFF3F51B5)),
+                  SizedBox(width: 8),
+                  Text("Current Wage Period", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
+                ],
+              ),
+              const Divider(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _stat("Days Worked", "${daysWorked.toInt()}"),
+                  _stat("Total Hours", "${monthlyHours.toInt()}"),
+                  _stat("Hourly", "₹${hourlyWage.toStringAsFixed(0)}"),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Estimated Net Salary:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text("₹${netSalary.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.green)),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _stat(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
+      ],
+    );
+  }
+
+  Widget _buildAttendanceList(String workerId) {
+    final todayKey = _dayKey(DateTime.now());
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(workerId)
+          .collection('attendance')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: Color(0xFF3F51B5)));
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+        
+        final rawDocs = snapshot.data?.docs ?? [];
+        if (rawDocs.isEmpty) {
+          return const Center(
+            child: Text('No attendance records found.', style: TextStyle(color: Colors.grey)),
+          );
+        }
+
+        final docs = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(rawDocs);
+        docs.sort((a, b) => b.id.compareTo(a.id));
+
+        return ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+            final String dateId = docs[index].id;
+            
+            final isToday = (dateId == todayKey);
+            
+            final inTime = (data['checkInDisplay'] as String?) ?? '--:--';
+            final outTime = (data['checkOutDisplay'] as String?) ?? '--:--';
+            final status = (data['status'] as String?)?.toLowerCase() ?? 'unmarked';
+            final totalHours = (data['totalHours'] as num?)?.toDouble() ?? 0.0;
+
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isToday ? Colors.green.shade50 : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: isToday ? Border.all(color: Colors.green.shade300, width: 1.5) : null,
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2))
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.calendar_today, size: 16, color: isToday ? Colors.green.shade700 : const Color(0xFF3F51B5)),
+                          const SizedBox(width: 8),
+                          Text(
+                            dateId,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: isToday ? Colors.green.shade900 : Colors.black87,
+                            ),
+                          ),
+                          if (isToday) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('TODAY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+                            )
+                          ]
+                        ],
+                      ),
+                      _buildStatusBadge(status),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(child: _timeBlock('In Time', inTime, Icons.login, Colors.green)),
+                      Expanded(child: _timeBlock('Out Time', outTime, Icons.logout, Colors.redAccent)),
+                      Expanded(
+                        child: _timeBlock(
+                          'Total', 
+                          '${totalHours.toStringAsFixed(1)} h', 
+                          Icons.access_time_filled, 
+                          Colors.blueAccent
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _timeBlock(String title, String value, IconData icon, Color iconColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: iconColor),
+            const SizedBox(width: 4),
+            Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+      ],
+    );
+  }
+
+  Widget _buildStatusBadge(String status) {
+    Color bg;
+    Color fg;
+    String label = status.toUpperCase();
+
+    switch (status) {
+      case 'present':
+        bg = Colors.green.shade100;
+        fg = Colors.green.shade800;
+        break;
+      case 'late':
+        bg = Colors.amber.shade100;
+        fg = Colors.amber.shade900;
+        break;
+      case 'absent':
+        bg = Colors.red.shade100;
+        fg = Colors.red.shade800;
+        break;
+      default:
+        bg = Colors.grey.shade200;
+        fg = Colors.grey.shade700;
+        label = 'UNMARKED';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: fg, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
       ),
     );
   }

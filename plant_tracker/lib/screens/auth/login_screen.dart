@@ -384,8 +384,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? const CircularProgressIndicator(color: Colors.white)
                           : Text(
                               isSignupMode ? "SIGN UP" : "LOGIN",
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                     ),
                   ),
